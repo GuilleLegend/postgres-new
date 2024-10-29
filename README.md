@@ -1,39 +1,72 @@
-# database.build ([formerly postgres.new](#why-rename-postgresnew))
+# postgres-new
 
-In-browser Postgres sandbox with AI assistance.
+In-browser Postgres sandbox with AI assistance. Built on Next.js.
 
-![github-repo-hero](https://github.com/user-attachments/assets/1ace0688-dfa7-4ddb-86bc-c976fa5b2f42)
+## Architecture
 
-With [database.build](https://database.build), you can instantly spin up an unlimited number of Postgres databases that run directly in your browser (and soon, deploy them to S3).
+We use PGlite for 2 purposes:
 
-Each database is paired with a large language model (LLM) which opens the door to some interesting use cases:
+1. A "meta" DB that keeps track of all of the user databases along with their message history
+2. A "user" DB for each database the user creates along with whatever tables/data they've created
 
-- Drag-and-drop CSV import (generate table on the fly)
-- Generate and export reports
-- Generate charts
-- Build database diagrams
+Both databases are stored locally in the browser via IndexedDB. This means that these databases are not persisted to the cloud and cannot be accessed from multiple devices (though this is on the roadmap).
 
-## How it works
+Every PGlite instance runs in a Web Worker so that the main thread is not blocked.
 
-All queries in database.build run directly in your browser. There’s no remote Postgres container or WebSocket proxy.
 
-How is this possible? [PGlite](https://pglite.dev/), a WASM version of Postgres that can run directly in your browser. Every database that you create spins up a new instance of PGlite that exposes a fully-functional Postgres database. Data is stored in IndexedDB so that changes persist after refresh.
+## AI
 
-## Monorepo
+The AI component is powered by OpenAI's GPT-4o model by default. The project uses [Vercel's AI SDK](https://sdk.vercel.ai/docs/introduction) to simplify message streams and tool calls.
 
-This is a monorepo split into the following projects:
+### Environment Variables
 
-- [Frontend (Next.js)](./apps/postgres-new/): This contains the primary web app built with Next.js
-- [Backend (pg-gateway)](./apps/db-service/): This serves S3-backed PGlite databases over the PG wire protocol using [pg-gateway](https://github.com/supabase-community/pg-gateway)
+In addition to the required `OPENAI_API_KEY`, the following environment variables can be configured:
 
-## Why rename postgres.new?
+- `OPENAI_API_BASE`: (Optional) The base URL for the OpenAI API. Defaults to `https://api.openai.com/v1`.
+- `OPENAI_MODEL`: (Optional) The model used by the AI component. Defaults to `gpt-4o-2024-08-06`.
 
-This project is not an official Postgres project and we don’t want to mislead anyone! We’re renaming to database.build because, well, that’s what this does. This will still be 100% Postgres-focused, just with a different URL.
+**NOTE**: The current prompts and tools are designed around the GPT-4o model. If you choose to use a different model, expect different behavior and results. Additionally, ensure that the model you select supports tool (function) call capabilities.
 
-## Video
 
-[![image](https://github.com/user-attachments/assets/9da04785-d813-4e9c-a400-4e00c63381a1)](https://youtu.be/ooWaPVvljlU)
+## Authentication
 
-## License
+Because LLMs cost money, a lightweight auth wall exists to prevent abuse. It is currently only used to validate that the user has a legitimate GitHub account, but in the future it could be used to save private/public databases to the cloud.
 
-Apache 2.0
+Authentication and users are managed by a [Supabase](https://supabase.com/) database. You can find the migrations and other configuration for this in the root [`./supabase`](../../supabase/) directory.
+
+## Development
+
+From this directory (`./apps/postgres-new`):
+
+1. Install dependencies:
+   ```shell
+   npm i
+   ```
+2. Start local Supabase stack:
+   ```shell
+   npx supabase start
+   ```
+3. Store local Supabase URL/anon key in `.env.local`:
+   ```shell
+   npx supabase status -o env \
+     --override-name api.url=NEXT_PUBLIC_SUPABASE_URL \
+     --override-name auth.anon_key=NEXT_PUBLIC_SUPABASE_ANON_KEY |
+       grep NEXT_PUBLIC >> .env.local
+   ```
+4. Create an [OpenAI API key](https://platform.openai.com/api-keys) and save to `.env.local`:
+   ```shell
+   echo 'OPENAI_API_KEY="<openai-api-key>"' >> .env.local
+   ```
+5. Start local Redis containers (used for rate limiting). Serves an API on port 8080:
+   ```shell
+   docker compose up -d
+   ```
+6. Store local KV (Redis) vars. Use these exact values:
+   ```shell
+   echo 'KV_REST_API_URL="http://localhost:8080"' >> .env.local
+   echo 'KV_REST_API_TOKEN="local_token"' >> .env.local
+   ```
+7. Start Next.js development server:
+   ```shell
+   npm run dev
+   ```
